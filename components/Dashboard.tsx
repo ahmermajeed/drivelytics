@@ -144,7 +144,7 @@ function DashboardInner() {
       open: true,
       ids: [car.id],
       title: "Delete rental?",
-      message: `This will remove “${car.carName}” from the Excel file. This action cannot be undone.`,
+      message: `This will permanently remove “${car.carName}”. This action cannot be undone.`,
     });
   };
 
@@ -155,7 +155,7 @@ function DashboardInner() {
       ids: Array.from(selected),
       title: `Delete ${selected.size} rental${selected.size > 1 ? "s" : ""}?`,
       message:
-        "The selected rows will be removed from the Excel file. This action cannot be undone.",
+        "The selected rows will be permanently removed. This action cannot be undone.",
     });
   };
 
@@ -194,9 +194,9 @@ function DashboardInner() {
             </h1>
             <p className="text-xs sm:text-sm text-slate-500 flex items-center gap-1.5">
               <FileSpreadsheet size={14} />
-              Excel-backed rental dashboard ·{" "}
+              Rental management dashboard ·{" "}
               <span className="font-mono text-[11px] bg-slate-100 px-1.5 py-0.5 rounded">
-                data/cars.xlsx
+                Postgres
               </span>
             </p>
           </div>
@@ -304,7 +304,7 @@ function DashboardInner() {
       {/* Footer */}
       <footer className="mt-10 text-center text-xs text-slate-400">
         Built with Next.js · Data persisted to{" "}
-        <span className="font-mono">data/cars.xlsx</span>
+        <span className="font-mono">Postgres</span>
       </footer>
 
       {/* Modals */}

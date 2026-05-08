@@ -111,8 +111,8 @@ export default function CarFormModal({
             </h2>
             <p className="text-xs text-slate-500">
               {initial
-                ? "Update the rental record. Changes save to the Excel file."
-                : "Add a new rental record. It will be appended to the Excel file."}
+                ? "Update the rental record. Changes save instantly."
+                : "Add a new rental record."}
             </p>
           </div>
           <button

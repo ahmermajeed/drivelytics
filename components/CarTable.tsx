@@ -130,7 +130,7 @@ export default function CarTable({
         </h3>
         <p className="mt-1 text-sm text-slate-500">
           Click <span className="font-medium text-slate-700">“Add Rental”</span>{" "}
-          to create your first record. It will be saved to the Excel file.
+          to create your first record.
         </p>
       </div>
     );
