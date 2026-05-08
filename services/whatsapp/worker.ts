@@ -103,7 +103,11 @@ async function main(): Promise<void> {
 
   scheduleBriefings(client);
 
-  const controlPort = Number(process.env.WA_CONTROL_PORT ?? 3001);
+  // Hosts like Render auto-assign a PORT env var the service MUST bind to.
+  // Fall back to WA_CONTROL_PORT (local dev) and finally 3001.
+  const controlPort = Number(
+    process.env.PORT ?? process.env.WA_CONTROL_PORT ?? 3001
+  );
   const server = startControlServer({ client, port: controlPort });
 
   // Graceful shutdown
