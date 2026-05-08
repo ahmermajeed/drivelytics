@@ -1,0 +1,23 @@
+services:
+  postgres:
+    image: postgres:16-alpine
+    container_name: drivelytics-pg
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: drivelytics
+      POSTGRES_PASSWORD: drivelytics
+      POSTGRES_DB: drivelytics
+    ports:
+      # Host 5433 -> container 5432. We're on 5433 because port 5432 is
+      # already taken by another project's container on this machine.
+      - "5433:5432"
+    volumes:
+      - drivelytics_pg_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U drivelytics -d drivelytics"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+volumes:
+  drivelytics_pg_data:

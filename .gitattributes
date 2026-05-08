@@ -1,0 +1,15 @@
+# Force LF line endings across the repo so Windows / macOS / Linux contributors
+# don't fight over CRLF noise (Vercel and Koyeb build on Linux).
+* text=auto eol=lf
+
+# Lockfiles & generated artifacts: always LF, never normalize content.
+package-lock.json -text eol=lf
+*.lock          -text eol=lf
+*.svg           -text
+*.png           binary
+*.jpg           binary
+*.jpeg          binary
+*.gif           binary
+*.ico           binary
+*.xlsx          binary
+*.xls           binary
