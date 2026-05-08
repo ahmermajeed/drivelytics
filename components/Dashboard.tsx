@@ -303,8 +303,10 @@ function DashboardInner() {
 
       {/* Footer */}
       <footer className="mt-10 text-center text-xs text-slate-400">
-        Built with Next.js · Data persisted to{" "}
-        <span className="font-mono">Postgres</span>
+        Built by{" "}
+        <span className="font-medium text-slate-500">Ahmar Khan</span>
+        {" · "}
+        AI-powered Drivelytics
       </footer>
 
       {/* Modals */}
