@@ -34,7 +34,7 @@ export const TOOL_DEFS: ToolDef[] = [
   {
     name: "listRentals",
     description:
-      "List rentals with optional filtering. Use this for any question about which cars are currently rented, expiring soon, overdue, or to find rentals matching a name.",
+      "List rentals from the fleet. **By default returns ALL rentals** (active + overdue + no-dates). Only pass `status` if the user specifically asks for a subset. For 'how many cars do I have', 'show me everything', 'total fleet' etc, do NOT pass status — leave it blank to get the full picture.",
     parameters: {
       type: "object",
       properties: {
