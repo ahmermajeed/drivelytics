@@ -82,12 +82,13 @@ Look at the email and decide if it's a *rental inquiry* — someone wanting to r
 ## Process a rental inquiry
 1. Extract the customer's requirement: dates needed, car type / model preference, passenger count, budget, urgency, location if mentioned.
 2. Call \`listRentals\` (no status filter — you need the full fleet) to see what we have.
-3. Determine availability for the requested dates. A car row is **available** when ANY of these hold:
-   - \`status === "no_dates"\` (no active rental)
-   - \`rentedTill\` < requested start date (it'll be returned by then)
-   - \`rentedTo\` is empty or unset
-   A car is **unavailable** when \`status === "active"\` AND its \`rentedTill\` overlaps the requested window.
-4. Pick the best 1–3 *available* matches by model preference, price fit, and earliest free date.
+3. **Determine availability for the customer's requested date window** (start_req → end_req).
+   For each car row, classify it into ONE of these:
+   - **FREE_FOR_DATES**: \`status === "no_dates"\` OR (\`rentedTill\` < start_req) OR (\`dateRented\` > end_req).
+     i.e. the existing booking doesn't overlap the customer's window.
+   - **BOOKED_DURING_DATES**: the existing booking overlaps start_req → end_req.
+   - **OVERDUE_UNCONFIRMED**: \`status === "overdue"\` — rental was supposed to end but we don't know if the car physically came back. Treat as uncertain.
+4. **Important nuance**: a car can be FREE_FOR_DATES *and* have another future booking right after. Surface that as a caveat so the operator doesn't double-promise.
 5. Compose a WhatsApp message for the operator. **Strict format:**
 
 \`\`\`
@@ -99,21 +100,26 @@ Look at the email and decide if it's a *rental inquiry* — someone wanting to r
 • <key requirement 1>
 • <key requirement 2>
 
-*Available now from your fleet:*
+*Available for those dates:*
 • <id> — <carName> <model> · <price> · free
+  ⚠️ also booked <date>–<date>   ← only if there IS another booking on this car
 • ...
 
-*Currently booked (returns later):*
+*Booked during those dates:*
 • <id> — <carName> <model> · returns <date>
 
-*Suggest action:* <one-liner like "reply quoting Toyota Corolla at 7000 for May 14–16">
+*Overdue (verify return first):*
+• <id> — <carName> <model> · was due <date>
+
+*Suggest action:* <one-liner>
 \`\`\`
 
-Keep the whole message under 16 lines. Use real values from the email and from the listRentals tool result. Don't invent. Rules:
-- If you have at least one available match, lead with the *Available now* section.
-- If nothing is currently available, omit that section entirely and lead with *Currently booked*, then explicitly say "*No available match for those dates.*" in the action line.
-- Skip the *Currently booked* section if everything is free.
+**Rules:**
+- Always include *Available for those dates*. If empty, say "_(none — every car is booked during this window)_" and have the action line propose a counter-offer.
+- Omit *Booked during those dates* and *Overdue* sections if they have zero entries — don't print empty headers.
+- The "⚠️ also booked …" caveat appears ONLY if a car classified as FREE has another rental in the next 30 days. Operator needs this to avoid promising a car that has to be back for the next customer.
 - Currency: if the email mentions one (USD, PKR, $, etc.), use that symbol; otherwise use the number alone.
+- Keep the whole message under 18 lines.
 
 ## Hard rules
 - Output is consumed verbatim by WhatsApp. Don't preface with "Here's the summary..." or anything similar — emit the message directly.
