@@ -27,6 +27,12 @@ export interface AgentInput {
   history?: ChatMessage[];
   /** Optional override; defaults to "now" for date-aware system prompt. */
   now?: Date;
+  /**
+   * Override the system prompt entirely. Used by non-chat surfaces (email
+   * processing, briefing composer) to give the model a different mission
+   * while still using the same tools and provider.
+   */
+  systemOverride?: string;
 }
 
 export interface AgentTrace {
@@ -72,7 +78,7 @@ export async function runAgent(input: AgentInput): Promise<AgentOutput> {
     trace.steps = step + 1;
 
     const result = await provider.chat({
-      system: systemPrompt(input.now),
+      system: input.systemOverride ?? systemPrompt(input.now),
       messages,
       tools: TOOL_DEFS,
     });

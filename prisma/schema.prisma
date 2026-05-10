@@ -55,3 +55,21 @@ model WhatsAppAuth {
   updatedAt DateTime @updatedAt
 }
 
+/// Microsoft Graph (Outlook) OAuth tokens.
+///
+/// Single row per logical account, keyed by `id` (default "default"). The
+/// access token is short-lived (~1h) — we refresh it transparently using the
+/// long-lived refresh token. The refresh token rotates on every refresh in
+/// some Microsoft tenants, so we always persist whatever the latest response
+/// gave us back.
+model OutlookAuth {
+  id                   String   @id
+  refreshToken         String   @db.Text
+  accessToken          String   @db.Text
+  accessTokenExpiresAt DateTime
+  /// Email address of the linked account, captured from the id_token for
+  /// display / debugging. Optional.
+  email                String?
+  updatedAt            DateTime @updatedAt
+}
+

@@ -1,5 +1,6 @@
 import { runAgent } from "../../lib/ai/agent";
 import { AIConfigError, getProvider } from "../../lib/ai/providers";
+import { startEmailPoller } from "../email/poller";
 import { allowlistInfo, isAllowed, jidToPhone } from "./allowlist";
 import { connectWhatsApp } from "./baileys";
 import { scheduleBriefings } from "./briefing";
@@ -102,6 +103,9 @@ async function main(): Promise<void> {
   });
 
   scheduleBriefings(client);
+
+  // Start the Outlook email poller alongside Baileys. No-op if not configured.
+  startEmailPoller({ whatsapp: client });
 
   // Hosts like Render auto-assign a PORT env var the service MUST bind to.
   // Fall back to WA_CONTROL_PORT (local dev) and finally 3001.
