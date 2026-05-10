@@ -1,36 +1,35 @@
+import http from "node:http";
+import net from "node:net";
+import crypto from "node:crypto";
+import { exec } from "node:child_process";
 import { persistTokens } from "../auth";
 import { prisma } from "../../../lib/prisma";
 
 /**
- * One-shot device-code OAuth flow.
+ * One-shot Google OAuth flow using the loopback redirect pattern.
  *
- * Run with: `npm run outlook:login`
+ * Run with: `npm run gmail:login`
  *
- * Prints a short user code and a verification URL. The operator opens the
- * URL on any device, signs in to their Microsoft account, and pastes the
- * code. We poll the token endpoint until they finish; then store the
- * refresh + access tokens in Postgres so the worker can pick them up on
- * its next poll cycle.
+ * Steps:
+ *  1. Bind a tiny HTTP server to a free port on 127.0.0.1.
+ *  2. Construct the auth URL with that loopback as the redirect_uri.
+ *  3. Open the operator's browser. They sign in, approve, Google redirects
+ *     back to the loopback with `?code=...`.
+ *  4. Server captures the code, exchanges it for tokens, persists, exits.
  *
  * No need to restart the worker afterward — `getAccessToken()` re-reads
  * the row on every call and refreshes transparently.
  */
 
-const TENANT = process.env.OUTLOOK_TENANT || "consumers";
-const CLIENT_ID = process.env.OUTLOOK_CLIENT_ID || "";
+const SCOPES = [
+  "https://www.googleapis.com/auth/gmail.modify",
+  "openid",
+  "email",
+  "profile",
+].join(" ");
 
-const SCOPES = "Mail.Read Mail.ReadWrite offline_access User.Read";
-
-interface DeviceCodeResponse {
-  user_code: string;
-  device_code: string;
-  verification_uri: string;
-  /** Sometimes "verification_uri_complete" with the code embedded. */
-  verification_uri_complete?: string;
-  expires_in: number;
-  interval: number;
-  message: string;
-}
+const AUTH_BASE = "https://accounts.google.com/o/oauth2/v2/auth";
+const TOKEN_URL = "https://oauth2.googleapis.com/token";
 
 interface TokenResponse {
   access_token: string;
@@ -38,128 +37,196 @@ interface TokenResponse {
   expires_in: number;
   scope?: string;
   id_token?: string;
+  token_type?: string;
 }
 
-interface OAuthError {
-  error: string;
-  error_description?: string;
+async function pickFreePort(): Promise<number> {
+  return new Promise((resolve, reject) => {
+    const srv = net.createServer();
+    srv.unref();
+    srv.on("error", reject);
+    srv.listen(0, "127.0.0.1", () => {
+      const addr = srv.address();
+      if (addr && typeof addr === "object") {
+        const { port } = addr;
+        srv.close(() => resolve(port));
+      } else {
+        reject(new Error("Could not allocate a free port"));
+      }
+    });
+  });
+}
+
+function openBrowser(url: string): void {
+  // Best-effort: launch the user's default browser. If it fails (no GUI,
+  // remote shell, etc.) we still printed the URL for them to open manually.
+  const platform = process.platform;
+  let cmd: string;
+  if (platform === "win32") {
+    // `start ""` syntax — the empty title is required so the URL isn't
+    // interpreted as the window title.
+    cmd = `start "" "${url}"`;
+  } else if (platform === "darwin") {
+    cmd = `open "${url}"`;
+  } else {
+    cmd = `xdg-open "${url}"`;
+  }
+  exec(cmd, (err) => {
+    if (err) {
+      console.error("(Could not auto-open browser; please open the URL above manually.)");
+    }
+  });
 }
 
 async function main(): Promise<void> {
-  if (!CLIENT_ID) {
+  const clientId = process.env.GMAIL_CLIENT_ID || "";
+  const clientSecret = process.env.GMAIL_CLIENT_SECRET || "";
+  if (!clientId || !clientSecret) {
     console.error(
-      "OUTLOOK_CLIENT_ID is not set. Register an Azure AD app and put the Application (client) ID in .env first."
+      "GMAIL_CLIENT_ID / GMAIL_CLIENT_SECRET not set in .env."
+    );
+    console.error(
+      "Create OAuth credentials at https://console.cloud.google.com/apis/credentials"
     );
     process.exit(1);
   }
 
-  console.log("Requesting device code from Microsoft...");
-  const codeResp = await fetch(
-    `https://login.microsoftonline.com/${TENANT}/oauth2/v2.0/devicecode`,
-    {
-      method: "POST",
-      headers: { "Content-Type": "application/x-www-form-urlencoded" },
-      body: new URLSearchParams({
-        client_id: CLIENT_ID,
-        scope: SCOPES,
-      }).toString(),
-    }
-  );
-  if (!codeResp.ok) {
-    const text = await codeResp.text().catch(() => "");
-    console.error(
-      `Device code request failed (${codeResp.status}): ${text.slice(0, 300)}`
-    );
-    process.exit(1);
-  }
-  const code = (await codeResp.json()) as DeviceCodeResponse;
+  const port = await pickFreePort();
+  const redirectUri = `http://127.0.0.1:${port}/oauth/callback`;
+  const state = crypto.randomBytes(16).toString("hex");
+
+  const authUrl = new URL(AUTH_BASE);
+  authUrl.searchParams.set("client_id", clientId);
+  authUrl.searchParams.set("redirect_uri", redirectUri);
+  authUrl.searchParams.set("response_type", "code");
+  authUrl.searchParams.set("scope", SCOPES);
+  // `offline` makes Google issue a refresh_token; `prompt=consent` ensures
+  // we get a *new* refresh token even if the user previously consented.
+  authUrl.searchParams.set("access_type", "offline");
+  authUrl.searchParams.set("prompt", "consent");
+  authUrl.searchParams.set("state", state);
 
   console.log("");
-  console.log("─".repeat(60));
-  console.log("  Open this URL and enter the code:");
-  console.log(`    URL:  ${code.verification_uri}`);
-  console.log(`    Code: ${code.user_code}`);
-  console.log("─".repeat(60));
-  if (code.verification_uri_complete) {
-    console.log(
-      `  Or open this direct URL (no manual code entry needed):\n    ${code.verification_uri_complete}`
-    );
-    console.log("");
-  }
-  console.log(
-    `  Polling for completion (expires in ${Math.round(code.expires_in / 60)} min)...`
-  );
+  console.log("─".repeat(64));
+  console.log("  Opening browser to authorize Gmail access.");
+  console.log("  If your browser doesn't open, paste this URL manually:");
+  console.log("");
+  console.log(`    ${authUrl.toString()}`);
+  console.log("─".repeat(64));
+  console.log("");
 
-  // Poll for token.
-  const intervalMs = (code.interval || 5) * 1000;
-  const deadline = Date.now() + code.expires_in * 1000;
-
-  while (Date.now() < deadline) {
-    await sleep(intervalMs);
-    const tokenResp = await fetch(
-      `https://login.microsoftonline.com/${TENANT}/oauth2/v2.0/token`,
-      {
-        method: "POST",
-        headers: { "Content-Type": "application/x-www-form-urlencoded" },
-        body: new URLSearchParams({
-          grant_type: "urn:ietf:params:oauth:grant-type:device_code",
-          client_id: CLIENT_ID,
-          device_code: code.device_code,
-        }).toString(),
+  // Wait for the auth code to come back via the loopback.
+  const code = await new Promise<string>((resolve, reject) => {
+    const server = http.createServer((req, res) => {
+      try {
+        const u = new URL(req.url ?? "/", `http://127.0.0.1:${port}`);
+        if (u.pathname !== "/oauth/callback") {
+          res.writeHead(404).end("Not found");
+          return;
+        }
+        const error = u.searchParams.get("error");
+        if (error) {
+          respondHtml(res, 400, "Authorization failed", `Google returned: ${error}`);
+          server.close();
+          reject(new Error(`Authorization error: ${error}`));
+          return;
+        }
+        const gotState = u.searchParams.get("state");
+        const gotCode = u.searchParams.get("code");
+        if (gotState !== state) {
+          respondHtml(res, 400, "State mismatch", "Possible CSRF — please rerun the login.");
+          server.close();
+          reject(new Error("State mismatch"));
+          return;
+        }
+        if (!gotCode) {
+          respondHtml(res, 400, "Missing code", "Google did not return an authorization code.");
+          server.close();
+          reject(new Error("No code"));
+          return;
+        }
+        respondHtml(
+          res,
+          200,
+          "Drivelytics connected ✓",
+          "You can close this tab and return to the terminal."
+        );
+        server.close();
+        resolve(gotCode);
+      } catch (e) {
+        reject(e);
       }
-    );
+    });
+    server.listen(port, "127.0.0.1", () => {
+      openBrowser(authUrl.toString());
+    });
+    // Hard timeout: 5 minutes.
+    setTimeout(() => {
+      server.close();
+      reject(new Error("Timed out waiting for browser authorization"));
+    }, 5 * 60_000).unref();
+  });
 
-    if (tokenResp.ok) {
-      const json = (await tokenResp.json()) as TokenResponse;
-      await persistTokens(json);
-      console.log("");
-      console.log("✓ Authorized. Refresh token saved to Postgres.");
-      console.log(
-        "  The worker will pick it up on its next email-poll cycle (within 60s)."
-      );
-      return;
-    }
+  console.log("Got authorization code, exchanging for tokens...");
 
-    // 4xx with a known error means we keep polling or fail outright.
-    const err = (await tokenResp
-      .json()
-      .catch(() => ({ error: "unknown" }))) as OAuthError;
-    if (err.error === "authorization_pending") {
-      // Still waiting for the user — keep polling.
-      continue;
-    }
-    if (err.error === "slow_down") {
-      // Microsoft asks us to back off; lengthen the interval.
-      await sleep(intervalMs);
-      continue;
-    }
-    if (err.error === "authorization_declined") {
-      console.error("  ✗ User declined the authorization.");
-      process.exit(2);
-    }
-    if (err.error === "expired_token") {
-      console.error("  ✗ Code expired. Re-run the command.");
-      process.exit(2);
-    }
+  const tokenResp = await fetch(TOKEN_URL, {
+    method: "POST",
+    headers: { "Content-Type": "application/x-www-form-urlencoded" },
+    body: new URLSearchParams({
+      code,
+      client_id: clientId,
+      client_secret: clientSecret,
+      redirect_uri: redirectUri,
+      grant_type: "authorization_code",
+    }).toString(),
+  });
+
+  if (!tokenResp.ok) {
+    const text = await tokenResp.text().catch(() => "");
+    console.error(`Token exchange failed (${tokenResp.status}): ${text.slice(0, 300)}`);
+    process.exit(2);
+  }
+
+  const tokens = (await tokenResp.json()) as TokenResponse;
+  if (!tokens.refresh_token) {
     console.error(
-      `  ✗ Authorization failed: ${err.error}${
-        err.error_description ? ` — ${err.error_description}` : ""
-      }`
+      "Google did not return a refresh_token. This usually means the user previously authorized this client."
+    );
+    console.error(
+      "Revoke the existing access at https://myaccount.google.com/permissions and try again."
     );
     process.exit(2);
   }
 
-  console.error("  ✗ Timed out waiting for user to authorize.");
-  process.exit(2);
+  await persistTokens(tokens);
+  console.log("");
+  console.log("✓ Authorized. Refresh token saved to Postgres.");
+  console.log("  The worker will pick it up on its next email-poll cycle (within 60s).");
 }
 
-function sleep(ms: number): Promise<void> {
-  return new Promise((resolve) => setTimeout(resolve, ms));
+function respondHtml(
+  res: http.ServerResponse,
+  status: number,
+  title: string,
+  body: string
+): void {
+  res.writeHead(status, { "Content-Type": "text/html; charset=utf-8" });
+  res.end(`<!doctype html>
+<html>
+<head><meta charset="utf-8"><title>${title}</title>
+<style>
+body { font-family: system-ui, -apple-system, sans-serif; max-width: 480px; margin: 80px auto; color: #1f2937; }
+h1 { color: ${status < 400 ? "#059669" : "#dc2626"}; }
+p { line-height: 1.5; }
+</style>
+</head>
+<body><h1>${title}</h1><p>${body}</p></body>
+</html>`);
 }
 
 main()
   .catch((e) => {
-    console.error("Login failed:", e);
+    console.error("Login failed:", (e as Error).message);
     process.exit(1);
   })
   .finally(async () => {

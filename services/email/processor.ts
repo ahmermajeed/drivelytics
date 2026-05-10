@@ -1,17 +1,16 @@
 import { runAgent } from "../../lib/ai/agent";
 import { emailTriageSystemPrompt } from "../../lib/ai/prompts";
 import type { WhatsAppClient } from "../whatsapp/baileys";
-import { type GraphMessage, markAsRead, plainTextOf } from "./graph-client";
+import { type EmailMessage, markAsRead } from "./gmail-client";
 
 /**
  * Process one incoming email through the AI triage agent and dispatch a
  * WhatsApp summary to the operator if it's a rental inquiry.
  *
- * The email is **always** marked as read on Microsoft Graph after we make
- * a decision, so the polling loop won't re-process it. If we crash before
- * marking, we'd re-process — but the AI's `SKIP` response is cheap and the
- * dispatch is keyed on Microsoft's stable message id, so duplicate dispatch
- * is the worst case (fine for an MVP).
+ * The email is **always** marked as read after we make a decision, so the
+ * polling loop won't re-process it. If we crash before marking, we'd
+ * re-process — but the AI's `SKIP` response is cheap and dispatch is keyed
+ * on the message id, so duplicate dispatch is the worst case.
  */
 
 export interface ProcessOptions {
@@ -23,28 +22,23 @@ export interface ProcessOptions {
 const MAX_BODY_CHARS = 6000; // keeps prompt size reasonable + costs predictable
 
 export async function processEmail(
-  msg: GraphMessage,
+  msg: EmailMessage,
   opts: ProcessOptions
 ): Promise<{ skipped: boolean; reply?: string }> {
-  const sender =
-    msg.from?.emailAddress.name ||
-    msg.from?.emailAddress.address ||
-    "(unknown sender)";
-  const senderEmail = msg.from?.emailAddress.address ?? "";
+  const sender = msg.from.name || msg.from.address || "(unknown sender)";
+  const senderEmail = msg.from.address;
 
-  const subject = msg.subject ?? "(no subject)";
-  const bodyFull = plainTextOf(msg);
+  const subject = msg.subject;
   const body =
-    bodyFull.length > MAX_BODY_CHARS
-      ? bodyFull.slice(0, MAX_BODY_CHARS) + "\n…(truncated)"
-      : bodyFull;
-  const received = msg.receivedDateTime;
+    msg.body.length > MAX_BODY_CHARS
+      ? msg.body.slice(0, MAX_BODY_CHARS) + "\n…(truncated)"
+      : msg.body;
 
   const userMessage =
     `An email just arrived. Decide whether it's a rental inquiry, then act per your instructions.\n\n` +
     `From: ${sender}${senderEmail ? ` <${senderEmail}>` : ""}\n` +
     `Subject: ${subject}\n` +
-    `Received: ${received}\n\n` +
+    `Received: ${msg.receivedAt}\n\n` +
     `--- BODY ---\n${body}\n--- END BODY ---`;
 
   let reply: string;
@@ -56,7 +50,6 @@ export async function processEmail(
     });
     reply = out.reply.trim();
   } catch (e) {
-    // Don't let one bad email take the poller down. Mark as read and move on.
     console.error(`[email] AI failed for "${subject}":`, e);
     await markAsRead(msg.id).catch((err) =>
       console.error("[email] markAsRead failed:", err)

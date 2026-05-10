@@ -20,7 +20,7 @@
     "whatsapp": "tsx --env-file=.env services/whatsapp/worker.ts",
     "whatsapp:logout": "tsx --env-file=.env services/whatsapp/scripts/logout.ts",
     "start:worker": "tsx services/whatsapp/worker.ts",
-    "outlook:login": "tsx --env-file=.env services/email/scripts/login.ts"
+    "gmail:login": "tsx --env-file=.env services/email/scripts/login.ts"
   },
   "prisma": {
     "seed": "tsx prisma/seed.ts"

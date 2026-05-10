@@ -1,25 +1,25 @@
-import { OutlookConfigError, OutlookNotConnectedError, getConnectedAccount } from "./auth";
-import { listUnreadMessages, whoAmI } from "./graph-client";
+import { EmailConfigError, EmailNotConnectedError, getConnectedAccount } from "./auth";
+import { listUnreadMessages, whoAmI } from "./gmail-client";
 import { processEmail } from "./processor";
 import type { WhatsAppClient } from "../whatsapp/baileys";
 
 /**
- * Outlook polling loop.
+ * Gmail polling loop.
  *
  * Runs alongside the Baileys WhatsApp connection in the same worker process,
- * sharing the same AI provider, tools, and database. Pulls unread emails
- * every `OUTLOOK_POLL_INTERVAL_MS` (default 60s), runs each through the
- * triage agent, and dispatches a WhatsApp alert for rental inquiries.
+ * sharing the same AI provider, tools, and database. Pulls unread inbox
+ * messages every `GMAIL_POLL_INTERVAL_MS` (default 60s), runs each through
+ * the triage agent, and dispatches a WhatsApp alert for rental inquiries.
  *
- * Idempotency: we mark each email as read on Microsoft Graph after the
- * decision, so the next poll won't pick it up again.
+ * Idempotency: we strip the UNREAD label after the decision, so the next
+ * poll won't pick it up again.
  *
  * Configuration:
- *   OUTLOOK_CLIENT_ID            Azure app client id (required)
- *   OUTLOOK_TENANT               "consumers" (default) | "organizations" | "common"
- *   OUTLOOK_POLL_INTERVAL_MS     ms between polls (default 60000)
- *   OUTLOOK_NOTIFY_PHONE         where to send alerts (falls back to AI_BRIEFING_PHONE)
- *   OUTLOOK_BATCH_SIZE           max emails per poll (default 10)
+ *   GMAIL_CLIENT_ID            Google Cloud OAuth client id (required)
+ *   GMAIL_CLIENT_SECRET        OAuth client secret (required)
+ *   GMAIL_POLL_INTERVAL_MS     ms between polls (default 60000, floor 15000)
+ *   GMAIL_NOTIFY_PHONE         where to send alerts (falls back to AI_BRIEFING_PHONE)
+ *   GMAIL_BATCH_SIZE           max emails per poll (default 10)
  */
 
 const DEFAULT_INTERVAL_MS = 60_000;
@@ -29,32 +29,32 @@ export interface StartOptions {
 }
 
 export function startEmailPoller(opts: StartOptions): NodeJS.Timeout | null {
-  if (!process.env.OUTLOOK_CLIENT_ID) {
+  if (!process.env.GMAIL_CLIENT_ID || !process.env.GMAIL_CLIENT_SECRET) {
     console.log(
-      "[email] OUTLOOK_CLIENT_ID not set — email integration disabled."
+      "[email] GMAIL_CLIENT_ID / GMAIL_CLIENT_SECRET not set — email integration disabled."
     );
     return null;
   }
 
   const notifyTo = (
-    process.env.OUTLOOK_NOTIFY_PHONE ||
+    process.env.GMAIL_NOTIFY_PHONE ||
     process.env.AI_BRIEFING_PHONE ||
     ""
   ).trim();
   if (!notifyTo) {
     console.log(
-      "[email] OUTLOOK_NOTIFY_PHONE / AI_BRIEFING_PHONE not set — email integration disabled."
+      "[email] GMAIL_NOTIFY_PHONE / AI_BRIEFING_PHONE not set — email integration disabled."
     );
     return null;
   }
 
   const interval = Math.max(
-    15_000, // floor: don't pound Microsoft
-    Number(process.env.OUTLOOK_POLL_INTERVAL_MS ?? DEFAULT_INTERVAL_MS)
+    15_000, // floor: don't pound Google
+    Number(process.env.GMAIL_POLL_INTERVAL_MS ?? DEFAULT_INTERVAL_MS)
   );
   const batchSize = Math.min(
     50,
-    Math.max(1, Number(process.env.OUTLOOK_BATCH_SIZE ?? 10))
+    Math.max(1, Number(process.env.GMAIL_BATCH_SIZE ?? 10))
   );
 
   console.log(
@@ -84,27 +84,25 @@ export function startEmailPoller(opts: StartOptions): NodeJS.Timeout | null {
       if (messages.length === 0) return;
       console.log(`[email] poll: ${messages.length} unread email(s) to triage`);
       for (const msg of messages) {
-        const subject = (msg.subject ?? "(no subject)").slice(0, 60);
+        const subject = msg.subject.slice(0, 60);
         try {
           const result = await processEmail(msg, {
             whatsapp: opts.whatsapp,
             notifyTo,
           });
           console.log(
-            `[email]   "${subject}" → ${
-              result.skipped ? "SKIP" : "alert sent"
-            }`
+            `[email]   "${subject}" → ${result.skipped ? "SKIP" : "alert sent"}`
           );
         } catch (e) {
           console.error(`[email]   "${subject}" failed:`, e);
         }
       }
     } catch (e) {
-      if (e instanceof OutlookNotConnectedError) {
+      if (e instanceof EmailNotConnectedError) {
         console.error(
-          "[email] not connected to Outlook. Run `npm run outlook:login` to authorize."
+          "[email] not connected to Gmail. Run `npm run gmail:login` to authorize."
         );
-      } else if (e instanceof OutlookConfigError) {
+      } else if (e instanceof EmailConfigError) {
         console.error(`[email] config error: ${e.message}`);
       } else {
         console.error("[email] poll failed:", (e as Error).message);
