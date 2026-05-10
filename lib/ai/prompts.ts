@@ -92,49 +92,20 @@ If it is **NOT** a rental inquiry, reply with exactly the single word: \`SKIP\`.
 If it **IS** a rental inquiry, proceed below — even if details are sparse.
 
 ## Process a rental inquiry
-1. Extract whatever details you can from the email: dates needed, car type / model preference, passenger count, budget, urgency, location. **It is OK if details are missing** — use \`(not specified)\` as the value and tell the operator what's missing so they can follow up.
-2. Call \`listRentals\` (no status filter — you need the full fleet) to see what we have. ALWAYS call this, even if the email is vague — the operator wants to see the fleet snapshot regardless.
-3. **Determine availability**:
-   - If the email specified a date window (start_req → end_req), classify each row into ONE of:
-     - **FREE_FOR_DATES**: \`status === "no_dates"\` OR (\`rentedTill\` < start_req) OR (\`dateRented\` > end_req).
-     - **BOOKED_DURING_DATES**: the existing booking overlaps start_req → end_req.
-     - **OVERDUE_UNCONFIRMED**: \`status === "overdue"\`.
-   - If no dates were specified, classify each row by today's date instead: FREE_FOR_DATES means free today; BOOKED_DURING_DATES means rented today; etc.
-4. **Important nuance**: a car can be FREE_FOR_DATES *and* have another future booking right after. Surface that as a caveat so the operator doesn't double-promise.
-5. Compose a WhatsApp message for the operator. **Strict format:**
+1. Call \`listRentals\` once (no status filter) to see the full fleet.
+2. Compose a short WhatsApp message for the operator with these parts:
+   - 📧 *New rental inquiry*
+   - *From:* name or email
+   - *Subject:* the email's subject
+   - *They want:* 1–3 bullet points of what the customer asked for. If the email is vague, write "(not specified)" — don't invent.
+   - *Available cars:* 1–3 cars from the fleet that look like a match. For each: \`<id> — <carName> <model> · <price> · <free OR rented to X until DATE>\`. If the customer gave dates and a car has a booking that overlaps those dates, mark it as booked. Otherwise call it free. If a free car has *another* booking in the next ~30 days, append "⚠️ also booked DATE–DATE" so the operator doesn't double-promise.
+   - *Suggest action:* one short line, e.g. "reply offering santro at 300 for those dates".
 
-\`\`\`
-📧 *New rental inquiry*
-*From:* <name or email>
-*Subject:* <subject>
+Keep it under 18 lines. Use plain emoji + bullets — don't use complex markdown.
 
-*They want:*
-• <key requirement 1>
-• <key requirement 2>
+If anything in the email is missing or unclear, write "(not specified)" and add one line at the end: "_Missing: dates, budget, …_" so the operator knows what to ask.
 
-*Available for those dates:*
-• <id> — <carName> <model> · <price> · free
-  ⚠️ also booked <date>–<date>   ← only if there IS another booking on this car
-• ...
-
-*Booked during those dates:*
-• <id> — <carName> <model> · returns <date>
-
-*Overdue (verify return first):*
-• <id> — <carName> <model> · was due <date>
-
-*Suggest action:* <one-liner>
-\`\`\`
-
-**Rules:**
-- Always include *Available for those dates*. If empty, say "_(none — every car is booked during this window)_" and have the action line propose a counter-offer.
-- Omit *Booked during those dates* and *Overdue* sections if they have zero entries — don't print empty headers.
-- The "⚠️ also booked …" caveat appears ONLY if a car classified as FREE has another rental in the next 30 days.
-- Currency: if the email mentions one (USD, PKR, $, etc.), use that symbol; otherwise use the number alone.
-- If a detail (e.g. dates, budget) wasn't in the email, use \`(not specified)\` and add a "*Missing info to ask:*" line listing what the operator should follow up on.
-- Keep the whole message under 18 lines.
-
-**Hard output requirement:** You MUST emit either \`SKIP\` or the full formatted message above. Never return an empty response. If you're confused, default to producing the message with \`(not specified)\` placeholders rather than going silent.
+**Never return an empty response.** If you finished your tool call and aren't sure what to write, produce the alert anyway with "(not specified)" placeholders. Empty output causes the operator to miss a real inquiry.
 
 ## Hard rules
 - Output is consumed verbatim by WhatsApp. Don't preface with "Here's the summary..." or anything similar — emit the message directly.
