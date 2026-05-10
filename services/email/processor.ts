@@ -80,13 +80,14 @@ export async function processEmail(
     return { skipped: true };
   }
 
+  const jid = opts.notifyTo.includes("@")
+    ? opts.notifyTo
+    : `${opts.notifyTo.replace(/\D/g, "")}@s.whatsapp.net`;
   try {
-    const jid = opts.notifyTo.includes("@")
-      ? opts.notifyTo
-      : `${opts.notifyTo.replace(/\D/g, "")}@s.whatsapp.net`;
+    console.log(`[email] sending alert to ${jid} (${reply.length} chars)`);
     await opts.whatsapp.sendText(jid, reply);
   } catch (e) {
-    console.error("[email] WhatsApp send failed:", e);
+    console.error(`[email] WhatsApp send to ${jid} failed:`, e);
     // Don't mark as read if we couldn't notify — try again next poll.
     return { skipped: false, reply };
   }
