@@ -198,8 +198,34 @@ async function main(): Promise<void> {
     process.exit(2);
   }
 
-  await persistTokens(tokens);
+  // Diagnostic: surface granted scopes so a mismatch is obvious immediately.
+  const grantedScopes = (tokens.scope || "")
+    .split(/\s+/)
+    .filter(Boolean);
   console.log("");
+  console.log(`Granted scopes (${grantedScopes.length}):`);
+  for (const s of grantedScopes) console.log(`  - ${s}`);
+  console.log("");
+
+  const needsGmailModify = "https://www.googleapis.com/auth/gmail.modify";
+  if (!grantedScopes.includes(needsGmailModify)) {
+    console.error("✗ Required Gmail scope is missing.");
+    console.error("");
+    console.error(`  Expected: ${needsGmailModify}`);
+    console.error("");
+    console.error("Likely causes:");
+    console.error("  1. The OAuth consent screen in Google Cloud Console doesn't list");
+    console.error("     `gmail.modify` under 'Data Access'. Add it there, save, then retry.");
+    console.error("  2. The granular consent screen was shown and the Gmail checkbox was");
+    console.error("     left unticked. Revoke this app at");
+    console.error("     https://myaccount.google.com/permissions and re-run `gmail:login`,");
+    console.error("     making sure to approve ALL requested permissions.");
+    console.error("");
+    console.error("Tokens were NOT saved.");
+    process.exit(3);
+  }
+
+  await persistTokens(tokens);
   console.log("✓ Authorized. Refresh token saved to Postgres.");
   console.log("  The worker will pick it up on its next email-poll cycle (within 60s).");
 }
