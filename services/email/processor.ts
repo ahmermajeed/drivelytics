@@ -65,6 +65,21 @@ export async function processEmail(
     return { skipped: true };
   }
 
+  // Defensive: if the model produced no usable content (empty string or
+  // our agent's "(no reply)" placeholder), don't ship that to WhatsApp.
+  // Mark the email read so we don't loop on it, but don't pester the
+  // operator with a meaningless ping. This protects against rare model
+  // glitches and emails with empty bodies (subject-only emails, etc.).
+  if (!reply || reply === "(no reply)") {
+    console.warn(
+      `[email] model returned empty reply for "${subject.slice(0, 60)}" — skipping send`
+    );
+    await markAsRead(msg.id).catch((err) =>
+      console.error("[email] markAsRead failed:", err)
+    );
+    return { skipped: true };
+  }
+
   try {
     const jid = opts.notifyTo.includes("@")
       ? opts.notifyTo
