@@ -41,7 +41,8 @@ export async function processEmail(
     `Received: ${msg.receivedAt}\n\n` +
     `--- BODY ---\n${body}\n--- END BODY ---`;
 
-  let reply: string;
+  let reply = "";
+  let trace: { toolCalls: { name: string }[]; steps: number } | null = null;
   try {
     const out = await runAgent({
       userMessage,
@@ -49,12 +50,35 @@ export async function processEmail(
       systemOverride: emailTriageSystemPrompt(),
     });
     reply = out.reply.trim();
+    trace = { toolCalls: out.trace.toolCalls, steps: out.trace.steps };
   } catch (e) {
     console.error(`[email] AI failed for "${subject}":`, e);
     await markAsRead(msg.id).catch((err) =>
       console.error("[email] markAsRead failed:", err)
     );
     return { skipped: true };
+  }
+
+  // Retry once if the model went silent. Some smaller models (especially
+  // gpt-oss-20b on Groq) occasionally finish a turn with empty text after
+  // a tool call. A direct nudge usually fixes it without changing semantics.
+  if (!reply || reply === "(no reply)") {
+    console.warn(
+      `[email] model returned empty reply for "${subject.slice(0, 60)}" — retrying with explicit nudge ` +
+        `(steps=${trace?.steps ?? "?"}, tools=${trace?.toolCalls.map((c) => c.name).join(",") ?? "none"})`
+    );
+    try {
+      const retry = await runAgent({
+        userMessage:
+          userMessage +
+          "\n\nReminder: produce either the literal word `SKIP` or the full formatted alert. Do NOT return an empty response.",
+        history: [],
+        systemOverride: emailTriageSystemPrompt(),
+      });
+      reply = retry.reply.trim();
+    } catch (e) {
+      console.error(`[email] retry failed for "${subject}":`, e);
+    }
   }
 
   // The triage prompt promises exactly "SKIP" for non-inquiries.
