@@ -1,3 +1,7 @@
+// MUST be the first import — patches console.error/log to drop libsignal's
+// noisy "Bad MAC" / "closing session" lines BEFORE Baileys boots.
+import "./silence-libsignal";
+
 import { runAgent } from "../../lib/ai/agent";
 import { AIConfigError, getProvider } from "../../lib/ai/providers";
 import { startEmailPoller } from "../email/poller";
@@ -57,7 +61,7 @@ async function main(): Promise<void> {
   );
 
   const client = await connectWhatsApp({
-    onMessage: async ({ jid, text }) => {
+    onMessage: async ({ jid, text, quotedText }) => {
       const phone = jidToPhone(jid);
 
       if (!isAllowed(jid)) {
@@ -75,15 +79,28 @@ async function main(): Promise<void> {
         return;
       }
 
-      console.log(`[recv] ${phone}: ${preview(text)}`);
+      console.log(
+        `[recv] ${phone}: ${preview(text)}` +
+          (quotedText ? ` (in reply to: "${preview(quotedText)}")` : "")
+      );
 
       // Slash commands handled before invoking the model.
       const handled = await handleSlashCommand(text, jid, phone, client);
       if (handled) return;
 
+      // If the user is *replying to* a previous message (long-press → Reply
+      // in WhatsApp), feed the quoted text in as inline context so the
+      // agent can answer with the right reference — typical case is
+      // replying to an email-triage alert and asking "are these available?".
+      const userMessage = quotedText
+        ? `[The user is replying to this previous message you sent:]\n` +
+          `> ${quotedText.slice(0, 1500).replace(/\n/g, "\n> ")}\n\n` +
+          `[Their reply:]\n${text}`
+        : text;
+
       const history = getHistory(phone);
       try {
-        const out = await runAgent({ userMessage: text, history });
+        const out = await runAgent({ userMessage, history });
         setHistory(phone, out.messages);
         await client.sendText(jid, out.reply);
         console.log(

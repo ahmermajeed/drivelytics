@@ -50,6 +50,13 @@ export interface IncomingMessage {
   jid: string;
   phone: string;
   text: string;
+  /**
+   * If the user replied to a previous WhatsApp message (long-press → Reply),
+   * this is the text of that quoted message. Lets the agent answer with the
+   * right context — e.g. "do we have these cars available?" referring to
+   * the cars listed in the email alert it just received.
+   */
+  quotedText: string | null;
   messageId: string;
 }
 
@@ -235,6 +242,7 @@ export async function connectWhatsApp(
             jid,
             phone,
             text,
+            quotedText: extractQuotedText(msg),
             messageId: msg.key.id ?? "",
           });
         } catch (e) {
@@ -295,6 +303,23 @@ function extractText(msg: WAMessage): string | null {
     m.extendedTextMessage?.text ??
     m.imageMessage?.caption ??
     m.videoMessage?.caption ??
+    null
+  );
+}
+
+/**
+ * If the user replied to (quoted) another message, return the quoted text.
+ * Baileys puts this under `extendedTextMessage.contextInfo.quotedMessage`.
+ */
+function extractQuotedText(msg: WAMessage): string | null {
+  const ctx = msg.message?.extendedTextMessage?.contextInfo;
+  const quoted = ctx?.quotedMessage;
+  if (!quoted) return null;
+  return (
+    quoted.conversation ??
+    quoted.extendedTextMessage?.text ??
+    quoted.imageMessage?.caption ??
+    quoted.videoMessage?.caption ??
     null
   );
 }
